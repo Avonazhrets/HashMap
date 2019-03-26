@@ -4,220 +4,197 @@
 #include <cmath>
 #include <stdexcept>
 
-template<class KeyType, class ValueType, class Hash = std::hash<KeyType> > class HashMap {
+constexpr static char NO_ELEMENT_VALUE = '.';
+constexpr static char EXIST_ELEMENT_VALUE = '+';
+constexpr static char DELETED_ELEMENT_VALUE = '-';
+
+template<class KeyType, class ValueType, class Hash = std::hash<KeyType>>
+class HashMap {
 private:
-    Hash tableHasher;
+    Hash hasher_;
 
-    using listValue = std::pair<const KeyType, ValueType>;
+    using listElement = std::pair<const KeyType, ValueType>;
 
-    std::vector<std::pair<typename std::list<listValue>::iterator, char>> table;
-    std::list<listValue> elements;
-    size_t tableSize = 0, tableStep = 1;
+    std::vector<std::pair<typename std::list<listElement>::iterator, char>> table_;
+    std::list<listElement> elements_;
+    size_t size_ = 0;
+    size_t step_ = 1;
 
 public:
-    using iterator = typename std::list<listValue>::iterator;
-    using const_iterator = typename std::list<listValue>::const_iterator;
+    using iterator = typename std::list<listElement>::iterator;
+    using const_iterator = typename std::list<listElement>::const_iterator;
 
-    HashMap(const Hash& hsh = Hash()) : tableHasher(hsh){
-        table.resize(2, {iterator(), '.'});
+    HashMap(const Hash& hash = Hash()) : hasher_(hash) {
+        table_.resize(2, {iterator(), NO_ELEMENT_VALUE});
     }
 
-    HashMap(iterator first, iterator last, const Hash& hsh = Hash()) : tableHasher(hsh) {
-        auto old_first = first;
-        size_t sz = 0;
+    template<typename Iterator>
+    HashMap(Iterator first, Iterator last, const Hash& hash = Hash()) : hasher_(hash) {
+        table_.resize(std::distance(first, last) * 2, {iterator(), NO_ELEMENT_VALUE});
         while (first != last) {
-            ++sz;
-            ++first;
-        }
-        table.resize(sz * 2, {iterator(), '.'});
-        first = old_first;
-        while (first != last) {
-            insert((*first));
-            ++first;
+            insert(*first++);
         }
     }
 
-    HashMap(const std::initializer_list<std::pair<KeyType, ValueType>>& arr, const Hash& hsh = Hash()) :
-            tableHasher(hsh) {
-        auto old_first = arr.begin(), last = arr.end();
-        auto first = old_first;
-        size_t sz = 0;
-        while (first != last) {
-            ++sz;
-            ++first;
-        }
-        table.resize(sz * 2, {iterator(), '.'});
-        first = old_first;
-        while (first != last) {
-            insert((*first));
-            ++first;
-        }
+    HashMap(std::initializer_list<std::pair<KeyType, ValueType>> ilist, const Hash& hash = Hash()) {
+        *this = HashMap(ilist.begin(), ilist.end(), hash);
     }
 
-    HashMap(size_t sz, const Hash& hsh = Hash()) : tableHasher(hsh) {
-        table.resize(sz, {iterator(), '.'});
+    HashMap(size_t size, const Hash& hash = Hash()) : hasher_(hash) {
+        table_.resize(size, {iterator(), NO_ELEMENT_VALUE});
     }
+
+    HashMap(const HashMap&) = default;
 
     size_t size() const {
-        return tableSize;
+        return size_;
     }
 
     bool empty() const {
-        return tableSize == 0;
+        return size_ == 0;
     }
 
     Hash hash_function() const {
-        return tableHasher;
+        return hasher_;
     }
 
-    void insert(std::pair<KeyType, ValueType> element) {
-        auto ind = tableHasher(element.first) % table.size();
-        while (table[ind].second != '.') {
-            if (table[ind].second == '+' &&
-                    table[ind].first->first == element.first)
+    void insert(const std::pair<KeyType, ValueType>& element) {
+        auto bucketIndex = hasher_(element.first) % table_.size();
+        while (table_[bucketIndex].second != NO_ELEMENT_VALUE) {
+            if (table_[bucketIndex].second == EXIST_ELEMENT_VALUE &&
+                table_[bucketIndex].first->first == element.first)
                 return;
-            ind += tableStep;
-            if (ind >= table.size())
-                ind %= table.size();
+            bucketIndex += step_;
+            if (bucketIndex >= table_.size()) {
+                bucketIndex %= table_.size();
+            }
         }
 
-        tableSize++;
+        size_++;
 
-        ind = tableHasher(element.first) % table.size();
-        while (table[ind].second == '+') {
-            ind += tableStep;
-            if (ind >= table.size())
-                ind %= table.size();
+        bucketIndex = hasher_(element.first) % table_.size();
+        while (table_[bucketIndex].second == EXIST_ELEMENT_VALUE) {
+            bucketIndex += step_;
+            if (bucketIndex >= table_.size()) {
+                bucketIndex %= table_.size();
+            }
         }
-        elements.push_back(element);
+        elements_.push_back(element);
 
-        auto last = elements.end();
+        auto last = elements_.end();
         --last;
-        table[ind] = make_pair(last, '+');
+        table_[bucketIndex] = make_pair(last, EXIST_ELEMENT_VALUE);
 
-
-        if (tableSize * 2 > table.size()) {
-            move_to_new_table(table.size() * 2);
+        if (size_ * 2 > table_.size()) {
+            rehash(table_.size() * 2);
         }
     }
 
     void erase(KeyType key) {
-        auto ind = tableHasher(key) % table.size();
-        while (table[ind].second != '.') {
-            if (table[ind].second == '+' &&
-                    table[ind].first->first == key) {
-                tableSize--;
-                table[ind].second = '-';
-                elements.erase(table[ind].first);
-                if (tableSize * 4 <= table.size())
-                    move_to_new_table(table.size() / 2);
+        auto bucketIndex = hasher_(key) % table_.size();
+        while (table_[bucketIndex].second != NO_ELEMENT_VALUE) {
+            if (table_[bucketIndex].second == EXIST_ELEMENT_VALUE &&
+                            table_[bucketIndex].first->first == key) {
+                size_--;
+                table_[bucketIndex].second = DELETED_ELEMENT_VALUE;
+                elements_.erase(table_[bucketIndex].first);
+                if (size_ * 4 <= table_.size()) {
+                    rehash(table_.size() / 2);
+                }
                 return;
             }
-            ind += tableStep;
-            if (ind >= table.size())
-                ind %= table.size();
+            bucketIndex += step_;
+            if (bucketIndex >= table_.size()) {
+                bucketIndex %= table_.size();
+            }
         }
     }
 
-    void move_to_new_table(size_t newSize) {
-        HashMap<KeyType, ValueType, Hash> new_table(newSize, tableHasher);
-        for (auto i : elements) {
+    void rehash(size_t newSize) {
+        HashMap<KeyType, ValueType, Hash> new_table(newSize, hasher_);
+        for (auto i : elements_) {
             new_table.insert(i);
         }
 
-        swap(table, new_table.table);
-        swap(elements, new_table.elements);
-        std::swap(tableSize, new_table.tableSize);
-        std::swap(tableStep, new_table.tableStep);
+        std::swap(table_, new_table.table_);
+        std::swap(elements_, new_table.elements_);
+        std::swap(size_, new_table.size_);
+        std::swap(step_, new_table.step_);
     }
 
     iterator begin() {
-        return elements.begin();
+        return elements_.begin();
     }
 
     iterator end() {
-        return elements.end();
+        return elements_.end();
     }
 
     const_iterator begin() const {
-        return elements.cbegin();
+        return elements_.cbegin();
     }
 
     const_iterator end() const {
-        return elements.cend();
+        return elements_.cend();
+    }
+
+    iterator find_position(KeyType key) const {
+        auto bucketIndex = hasher_(key) % table_.size();
+        while (table_[bucketIndex].second != NO_ELEMENT_VALUE) {
+            if (table_[bucketIndex].second == EXIST_ELEMENT_VALUE &&
+                (*table_[bucketIndex].first).first == key) {
+                return table_[bucketIndex].first;
+            }
+            bucketIndex += step_;
+            if (bucketIndex >= table_.size()) {
+                bucketIndex %= table_.size();
+            }
+        }
+        return iterator{};
     }
 
     iterator find(KeyType key) {
-        auto ind = tableHasher(key) % table.size();
-        while (table[ind].second != '.') {
-            if (table[ind].second == '+' &&
-                (*table[ind].first).first == key) {
-                return table[ind].first;
-            }
-            ind += tableStep;
-            if (ind >= table.size())
-                ind %= table.size();
-        }
-        return end();
+        auto position = find_position(key);
+        return position == iterator{} ? end() : position;
     }
 
     const_iterator find(KeyType key) const {
-        auto ind = tableHasher(key) % table.size();
-        while (table[ind].second != '.') {
-            if (table[ind].second == '+' &&
-                (*table[ind].first).first == key) {
-                return table[ind].first;
-            }
-            ind += tableStep;
-            if (ind >= table.size())
-                ind %= table.size();
-        }
-        return end();
+        auto position = find_position(key);
+        return position == iterator{} ? end() :
+                            static_cast<const_iterator>(position);
     }
 
-    ValueType& operator [](KeyType key) {
-        auto ind = tableHasher(key) % table.size();
-        while (table[ind].second != '.') {
-            if (table[ind].second == '+' &&
-                table[ind].first->first == key)
-                return table[ind].first->second;
-            ind += tableStep;
-            if (ind >= table.size())
-                ind %= table.size();
+    ValueType& operator[](KeyType key) {
+        auto position = find(key);
+        if (position != end()) {
+            return position->second;
         }
         insert(std::make_pair(key, ValueType{}));
-        auto last = elements.end();
+        auto last = elements_.end();
         --last;
         return (*last).second;
     }
 
     const ValueType& at(KeyType key) const {
-        auto ind = tableHasher(key) % table.size();
-        while (table[ind].second != '.') {
-            if (table[ind].second == '+' &&
-                table[ind].first->first == key)
-                return table[ind].first->second;
-            ind += tableStep;
-            if (ind >= table.size())
-                ind %= table.size();
+        auto position = find(key);
+        if (position != end()) {
+            return position->second;
         }
         throw std::out_of_range("error");
     }
 
     void clear() {
-        elements.clear();
-        table.clear();
-        tableSize = 0;
-        table.resize(2, {iterator(), '.'});
+        elements_.clear();
+        table_.clear();
+        size_ = 0;
+        table_.resize(2, {iterator(), NO_ELEMENT_VALUE});
     }
 
-    HashMap<KeyType, ValueType, Hash>& operator =(HashMap<KeyType, ValueType, Hash> new_table) {
-        std::swap(table, new_table.table);
-        std::swap(elements, new_table.elements);
-        std::swap(tableSize, new_table.tableSize);
-        std::swap(tableStep, new_table.tableStep);
+    HashMap& operator=(HashMap new_table) {
+        std::swap(table_, new_table.table_);
+        std::swap(elements_, new_table.elements_);
+        std::swap(size_, new_table.size_);
+        std::swap(step_, new_table.step_);
         return *this;
     }
-
-    ~HashMap() {}
 };
