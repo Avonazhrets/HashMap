@@ -1,2 +1,3 @@
 # HashMap
-Best realization of HashMap you've ever seen.
+
+My realization of std::unordered_map using dynamically expanding vector of lists.
